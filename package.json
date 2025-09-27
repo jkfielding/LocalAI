@@ -1,0 +1,73 @@
+{
+  "name": "localai-chat-react",
+  "private": false,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A modern React-based Progressive Web App for chatting with local AI services (LM Studio, Ollama, LocalAI, etc.)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "serve": "vite preview --host 0.0.0.0 --port 8080",
+    "start": "npm run build && cd server && npm install && npm start",
+    "start:server": "cd server && npm start",
+    "setup": "npm install && npm run build && cd server && npm install",
+    "docker:build": "docker build -t localai-chat .",
+    "docker:run": "docker run -p 5174:5174 -v localai-data:/app/server/data localai-chat",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f"
+  },
+  "dependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-hot-toast": "^2.6.0",
+    "react-icons": "^5.5.0",
+    "vite-plugin-pwa": "^1.0.3",
+    "workbox-window": "^7.3.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.36.0",
+    "@types/node": "^24.5.2",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.3",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.36.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^16.4.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.44.0",
+    "vite": "^7.1.7"
+  },
+  "keywords": [
+    "pwa",
+    "progressive-web-app",
+    "ai-chat",
+    "lm-studio",
+    "ollama",
+    "localai",
+    "llm",
+    "local-ai",
+    "chat",
+    "ai-assistant",
+    "react",
+    "tailwind",
+    "typescript",
+    "cross-platform"
+  ],
+  "author": "LocalAI Chat Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jkfielding/LocalAI"
+  },
+  "bugs": {
+    "url": "https://github.com/jkfielding/LocalAI/issues"
+  },
+  "homepage": "https://github.com/jkfielding/LocalAI#readme"
+}

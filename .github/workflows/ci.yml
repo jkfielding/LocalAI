@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run linter
+      run: npm run lint
+      
+    - name: Type check
+      run: npx tsc --noEmit
+      
+    - name: Build project
+      run: npm run build
+      
+    - name: Test build artifacts
+      run: |
+        test -d dist
+        test -f dist/index.html
+        test -f dist/assets/index-*.js
+        test -f dist/assets/index-*.css
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build Docker image
+      run: docker build -t localai-chat-test .
+      
+    - name: Test Docker container
+      run: |
+        docker run -d --name test-container -p 5174:5174 localai-chat-test
+        sleep 10
+        curl -f http://localhost:5174/api/health || exit 1
+        docker stop test-container
+        docker rm test-container

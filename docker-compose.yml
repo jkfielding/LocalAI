@@ -1,0 +1,31 @@
+services:
+  localai-chat:
+    build: .
+    container_name: localai-chat-pwa
+    restart: unless-stopped
+    ports:
+      - "5174:5174"
+    environment:
+      - NODE_ENV=production
+      - PORT=5174
+      - HOST=0.0.0.0
+    network_mode: "bridge"
+    volumes:
+      # Persist chat history data
+      - localai-chat-data:/app/server/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5174/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    labels:
+      - "com.localai.description=LocalAI Chat PWA with companion server"
+      - "com.localai.version=1.0.0"
+      - "com.docker.desktop.extension=true"
+
+volumes:
+  localai-chat-data:
+    driver: local
+    labels:
+      - "com.localai.data=chat-history"

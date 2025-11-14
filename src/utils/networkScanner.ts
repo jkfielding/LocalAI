@@ -14,6 +14,15 @@ export interface ScanResult {
   scanDuration: number;
 }
 
+interface OpenAIModelMeta {
+  id: string;
+  owned_by?: string;
+}
+
+interface OllamaModelMeta {
+  name: string;
+}
+
 export class NetworkScanner {
   // Prioritized ports - most common first
   private static readonly PRIORITY_PORTS = [
@@ -39,39 +48,26 @@ export class NetworkScanner {
     'ollama': ['/api/tags'],
   };
 
-  /**
-   * Quick scan - only check localhost and current device IP with priority ports
-   */
   static async quickScan(): Promise<NetworkDevice[]> {
     const startTime = Date.now();
     const devices: NetworkDevice[] = [];
     
-    // Get current device IP
     const currentIP = await this.getCurrentDeviceIP();
     
-    // Quick candidates - check most likely LM Studio locations
     const quickCandidates = [
       '127.0.0.1',
       'localhost',
       currentIP,
-      // Add common Mac IPs for cross-device detection
       ...(currentIP ? [
         currentIP.replace(/\d+$/, '1'),
-        currentIP.replace(/\d+$/, '2'), 
         currentIP.replace(/\d+$/, '100'),
         currentIP.replace(/\d+$/, '101'),
         currentIP.replace(/\d+$/, '102')
       ] : []),
     ].filter(Boolean) as string[];
     
-    // Remove duplicates
     const uniqueCandidates = [...new Set(quickCandidates)];
 
-    const totalRequests = uniqueCandidates.length * this.PRIORITY_PORTS.length;
-    console.log(`🔍 Quick scan: ${uniqueCandidates.length} IPs × ${this.PRIORITY_PORTS.length} ports = ${totalRequests} requests`);
-    console.log(`📱 Quick scan targets:`, uniqueCandidates);
-
-    // Test each IP with priority ports only
     const promises = uniqueCandidates.flatMap(ip => 
       this.PRIORITY_PORTS.map(port => this.testDevice(ip, port))
     );
@@ -84,30 +80,22 @@ export class NetworkScanner {
       }
     });
 
-    const duration = Date.now() - startTime;
-    console.log(`✅ Quick scan completed in ${duration}ms, found ${devices.length} devices`);
+    console.log(`Quick scan: ${Date.now() - startTime}ms, found ${devices.length} device(s)`);
     
     return devices;
   }
 
-  /**
-   * Smart scan - checks likely IP addresses with all ports
-   */
   static async scanNetwork(progressCallback?: (progress: { current: number; total: number; found: number }) => void): Promise<ScanResult> {
     const startTime = Date.now();
     const devices: NetworkDevice[] = [];
     
-    // Get smart IP candidates (much fewer than full subnet)
     const ipCandidates = await this.getSmartIPCandidates();
     const allPorts = [...this.PRIORITY_PORTS, ...this.EXTENDED_PORTS];
     
     const totalRequests = ipCandidates.length * allPorts.length;
-    console.log(`🌐 Smart scan: ${ipCandidates.length} IPs × ${allPorts.length} ports = ${totalRequests} requests (was ~1778 before!)`);
-
     let current = 0;
-    const batchSize = 8;
+    const batchSize = 12;
 
-    // Process in batches
     for (let i = 0; i < ipCandidates.length; i += batchSize) {
       const batch = ipCandidates.slice(i, i + batchSize);
       
@@ -132,14 +120,13 @@ export class NetworkScanner {
         }
       });
 
-      // Small delay between batches
       if (i + batchSize < ipCandidates.length) {
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await new Promise(resolve => setTimeout(resolve, 30));
       }
     }
 
     const scanDuration = Date.now() - startTime;
-    console.log(`✅ Smart scan completed in ${scanDuration}ms, found ${devices.length} devices`);
+    console.log(`Network scan: ${scanDuration}ms, ${devices.length} device(s) found`);
     
     return {
       devices,
@@ -147,9 +134,6 @@ export class NetworkScanner {
     };
   }
 
-  /**
-   * Get smart IP candidates - focus on most likely addresses
-   */
   private static async getSmartIPCandidates(): Promise<string[]> {
     try {
       const currentIP = await this.getCurrentDeviceIP();
@@ -173,29 +157,22 @@ export class NetworkScanner {
       candidates.add(`${baseIP}.1`);
       candidates.add(`${baseIP}.254`);
       
-      // Common static IPs (expanded for better Mac discovery)
-      for (const staticIP of [1, 2, 10, 20, 50, 100, 101, 102, 103, 110, 150, 200, 250, 254]) {
+      for (const staticIP of [2, 10, 20, 50, 100, 101, 102, 103, 110, 150, 200, 250]) {
         candidates.add(`${baseIP}.${staticIP}`);
       }
       
-      // Expanded adjacent IPs for cross-device discovery
-      const scanRange = 15; // Scan more IPs around current device
-      for (let i = Math.max(1, currentLastOctet - scanRange); i <= Math.min(254, currentLastOctet + scanRange); i++) {
+      const scanRange = 10;
+      for (let i = Math.max(2, currentLastOctet - scanRange); i <= Math.min(253, currentLastOctet + scanRange); i++) {
         candidates.add(`${baseIP}.${i}`);
       }
       
-      // Add common Mac IP ranges
-      // Macs often get IPs in certain ranges
-      for (let i = 2; i <= 50; i++) {
+      for (let i = 2; i <= 30; i++) {
         candidates.add(`${baseIP}.${i}`);
       }
 
-      const result = Array.from(candidates);
-      console.log(`📋 Smart IP candidates (${result.length} IPs):`, result.slice(0, 10), result.length > 10 ? `... and ${result.length - 10} more` : '');
-      console.log(`📱 Current device IP: ${currentIP}`);
-      return result;
-    } catch (error) {
-      console.warn('Failed to get smart IP candidates, using fallback:', error);
+      return Array.from(candidates);
+    } catch {
+      console.warn('Failed to determine network, using fallback IPs');
       return this.getFallbackIPs();
     }
   }
@@ -221,7 +198,7 @@ export class NetworkScanner {
         });
         
         pc.createOffer().then(offer => pc.setLocalDescription(offer));
-      } catch (error) {
+      } catch {
         resolve(null);
       }
     });
@@ -264,7 +241,7 @@ export class NetworkScanner {
       };
 
       return device;
-    } catch (error) {
+    } catch {
       return null;
     }
   }
@@ -274,20 +251,21 @@ export class NetworkScanner {
     modelInfo?: NetworkDevice['modelInfo'];
   } | null> {
     const baseUrl = `http://${ip}:${port}`;
+    const isLocalhost = ip === '127.0.0.1' || ip === 'localhost';
+    const timeout = isLocalhost ? 1000 : 2000;
     
-    // Try OpenAI-compatible endpoints (port 1234 is common for LM Studio)
     if (port === 1234) {
       try {
         const response = await fetch(`${baseUrl}/v1/models`, {
           method: 'GET',
-          signal: AbortSignal.timeout(2000)
+          signal: AbortSignal.timeout(timeout)
         });
         
         if (response.ok) {
           try {
             const data = await response.json();
             // Check if this is LM Studio by looking for specific patterns
-            const isLMStudio = data.data?.some((m: any) => 
+            const isLMStudio = data.data?.some((m: OpenAIModelMeta) => 
               m.id?.includes('lm-studio') || 
               m.owned_by === 'lm-studio' ||
               response.headers.get('server')?.includes('lm-studio')
@@ -297,7 +275,7 @@ export class NetworkScanner {
               type: 'openai-compatible',
               modelInfo: {
                 name: isLMStudio ? 'LM Studio' : 'OpenAI-Compatible API',
-                models: data.data?.map((m: any) => m.id) || []
+                models: data.data?.map((m: OpenAIModelMeta) => m.id) || []
               }
             };
           } catch {
@@ -312,12 +290,11 @@ export class NetworkScanner {
       }
     }
 
-    // Try Ollama endpoints
     if (port === 11434) {
       try {
         const response = await fetch(`${baseUrl}/api/tags`, {
           method: 'GET',
-          signal: AbortSignal.timeout(5000) // Longer timeout for cross-device
+          signal: AbortSignal.timeout(timeout)
         });
         
         if (response.ok) {
@@ -327,7 +304,7 @@ export class NetworkScanner {
               type: 'ollama',
               modelInfo: {
                 name: 'Ollama',
-                models: data.models?.map((m: any) => m.name) || []
+                models: data.models?.map((m: OllamaModelMeta) => m.name) || []
               }
             };
           } catch {
@@ -339,12 +316,11 @@ export class NetworkScanner {
       }
     }
 
-    // Try LocalAI endpoints
     if (port === 8080 || port === 5174) {
       try {
         const healthResponse = await fetch(`${baseUrl}/api/health`, {
           method: 'GET',
-          signal: AbortSignal.timeout(5000) // Longer timeout for cross-device
+          signal: AbortSignal.timeout(timeout)
         });
         
         if (healthResponse.ok) {
@@ -354,7 +330,7 @@ export class NetworkScanner {
         try {
           const modelsResponse = await fetch(`${baseUrl}/v1/models`, {
             method: 'GET',
-            signal: AbortSignal.timeout(2000)
+            signal: AbortSignal.timeout(timeout)
           });
           
           if (modelsResponse.ok) {
@@ -364,7 +340,7 @@ export class NetworkScanner {
                 type: 'localai',
                 modelInfo: {
                   name: 'LocalAI',
-                  models: data.data?.map((m: any) => m.id) || []
+                  models: data.data?.map((m: OpenAIModelMeta) => m.id) || []
                 }
               };
             } catch {
@@ -377,12 +353,11 @@ export class NetworkScanner {
       }
     }
 
-    // Try other common OpenAI-compatible ports with specific service detection
     if ([3000, 5000, 8000].includes(port)) {
       try {
         const response = await fetch(`${baseUrl}/v1/models`, {
           method: 'GET',
-          signal: AbortSignal.timeout(5000) // Longer timeout for cross-device
+          signal: AbortSignal.timeout(timeout)
         });
         
         if (response.ok) {
@@ -397,7 +372,7 @@ export class NetworkScanner {
               serviceName = 'OpenRouter';
             } else if (serverHeader.includes('together') || baseUrl.includes('together')) {
               serviceName = 'Together AI';
-            } else if (data.data?.some((m: any) => m.owned_by?.includes('anthropic'))) {
+            } else if (data.data?.some((m: OpenAIModelMeta) => m.owned_by?.includes('anthropic'))) {
               serviceName = 'Anthropic API';
             }
             
@@ -405,7 +380,7 @@ export class NetworkScanner {
               type: 'openai-compatible',
               modelInfo: {
                 name: serviceName,
-                models: data.data?.map((m: any) => m.id) || []
+                models: data.data?.map((m: OpenAIModelMeta) => m.id) || []
               }
             };
           } catch {
@@ -420,13 +395,12 @@ export class NetworkScanner {
       }
     }
 
-    // Generic AI service detection
     for (const [serviceType, endpoints] of Object.entries(this.TEST_ENDPOINTS)) {
       for (const endpoint of endpoints) {
         try {
           const response = await fetch(`${baseUrl}${endpoint}`, {
             method: 'GET',
-            signal: AbortSignal.timeout(1500)
+            signal: AbortSignal.timeout(1000)
           });
           
           if (response.ok) {

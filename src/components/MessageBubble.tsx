@@ -1,8 +1,56 @@
-import React from 'react';
-import { FiUser, FiCpu, FiAlertCircle } from 'react-icons/fi';
+import React, { useState, useEffect, useRef } from 'react';
+import { FiUser, FiCpu, FiAlertCircle, FiVolume2, FiVolumeX, FiPause } from 'react-icons/fi';
 import type { MessageBubbleProps } from '../types';
+import { useTextToSpeech } from '../hooks/useTextToSpeech';
+import { useSettings } from '../hooks/useSettings';
+import { useChat } from '../hooks/useChat';
+
+const AUTO_PLAY_WINDOW_MS = 120000; // Only auto-play within the last 2 minutes
 
 const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
+  const { settings } = useSettings();
+  const { lastAssistantMessageId, lastAssistantMessageTimestamp } = useChat();
+  const { speak, stop, pause, resume, isSpeaking, isPaused, isSupported } = useTextToSpeech({
+    rate: settings.ttsRate,
+    pitch: settings.ttsPitch,
+    volume: settings.ttsVolume
+  });
+  const [isThisMessageSpeaking, setIsThisMessageSpeaking] = useState(false);
+  const autoPlayTriggeredRef = useRef(false);
+
+  const sanitizeContentForSpeech = (content: string) => {
+    if (!content) return '';
+    return content
+      .replace(/```[\s\S]*?```/g, (block) => block.replace(/```/g, ' '))
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/`([^`]*)`/g, '$1')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  const handleSpeak = () => {
+    if (isThisMessageSpeaking) {
+      if (isPaused) {
+        resume();
+      } else {
+        pause();
+      }
+    } else {
+      const textToSpeak = sanitizeContentForSpeech(message.content);
+      if (!textToSpeak) return;
+      autoPlayTriggeredRef.current = true;
+      setIsThisMessageSpeaking(true);
+      speak(textToSpeak);
+    }
+  };
+
+  const handleStop = () => {
+    stop();
+    setIsThisMessageSpeaking(false);
+  };
+
   const formatContent = (content: string) => {
     // Basic markdown-style formatting
     return content
@@ -62,6 +110,61 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
 
   const styles = getRoleStyles();
 
+  useEffect(() => {
+    if (!isSpeaking) {
+      setIsThisMessageSpeaking(false);
+    }
+  }, [isSpeaking]);
+
+  useEffect(() => {
+    if (!settings.ttsEnabled && isThisMessageSpeaking) {
+      stop();
+      setIsThisMessageSpeaking(false);
+    }
+  }, [settings.ttsEnabled, isThisMessageSpeaking, stop]);
+
+  useEffect(() => {
+    if (autoPlayTriggeredRef.current) {
+      return;
+    }
+
+    const isLatestAssistantMessage = message.id === lastAssistantMessageId;
+    const recentEnough = lastAssistantMessageTimestamp > 0 
+      ? Date.now() - lastAssistantMessageTimestamp <= AUTO_PLAY_WINDOW_MS
+      : false;
+
+    if (
+      message.role === 'assistant' &&
+      !message.isStreaming &&
+      !message.isHistorical &&
+      settings.ttsEnabled &&
+      settings.ttsAutoPlay &&
+      isSupported &&
+      isLatestAssistantMessage &&
+      recentEnough
+    ) {
+      const textToSpeak = sanitizeContentForSpeech(message.content);
+      if (!textToSpeak) {
+        return;
+      }
+      autoPlayTriggeredRef.current = true;
+      setIsThisMessageSpeaking(true);
+      speak(textToSpeak);
+    }
+  }, [
+    isSupported,
+    lastAssistantMessageId,
+    lastAssistantMessageTimestamp,
+    message.content,
+    message.id,
+    message.isHistorical,
+    message.isStreaming,
+    message.role,
+    settings.ttsAutoPlay,
+    settings.ttsEnabled,
+    speak
+  ]);
+
   return (
     <div className={`flex items-start space-x-3 ${styles.container}`}>
       {message.role !== 'user' && (
@@ -80,8 +183,35 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
           }}
         />
         
-        <div className="text-xs opacity-60 mt-2">
-          {new Date(message.timestamp).toLocaleTimeString()}
+        <div className="flex items-center justify-between mt-2">
+          <div className="text-xs opacity-60">
+            {new Date(message.timestamp).toLocaleTimeString()}
+          </div>
+          
+          {message.role === 'assistant' && !message.isStreaming && settings.ttsEnabled && isSupported && (
+            <div className="flex items-center space-x-1">
+              {isThisMessageSpeaking && isSpeaking && (
+                <button
+                  onClick={handleStop}
+                  className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                  title="Stop"
+                >
+                  <FiVolumeX size={14} className="opacity-60" />
+                </button>
+              )}
+              <button
+                onClick={handleSpeak}
+                className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                title={isThisMessageSpeaking ? (isPaused ? "Resume" : "Pause") : "Read aloud"}
+              >
+                {isThisMessageSpeaking && isSpeaking && !isPaused ? (
+                  <FiPause size={14} className="opacity-60" />
+                ) : (
+                  <FiVolume2 size={14} className={isThisMessageSpeaking ? "opacity-100 text-blue-600" : "opacity-60"} />
+                )}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

@@ -3,7 +3,11 @@ REM LocalAI Chat PWA - Standalone Deployment Script (Windows)
 REM This script sets up and runs the LocalAI Chat PWA with its companion server
 
 echo 🚀 LocalAI Chat PWA - Standalone Setup
-echo ======================================
+echo ====================================== 
+
+REM Always run from the directory that contains this script
+set SCRIPT_DIR=%~dp0
+cd /d "%SCRIPT_DIR%"
 
 REM Check if Node.js is installed
 node --version >nul 2>&1
@@ -51,6 +55,8 @@ REM Set environment variables
 set NODE_ENV=production
 if not defined PORT set PORT=5174
 if not defined HOST set HOST=0.0.0.0
+set DATA_DIR=%SCRIPT_DIR%server\data
+set STATIC_DIR=%SCRIPT_DIR%dist
 
 echo.
 echo 🌟 Starting LocalAI Chat on port %PORT%...

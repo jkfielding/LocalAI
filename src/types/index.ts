@@ -5,6 +5,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system' | 'error';
   timestamp: number;
   isStreaming?: boolean;
+  isHistorical?: boolean;
 }
 
 // Application settings interface
@@ -20,6 +21,12 @@ export interface AppSettings {
   systemPrompt: string;
   mcpEnabled: boolean;
   mcpServers: MCPServer[];
+  voiceInputEnabled: boolean;
+  ttsEnabled: boolean;
+  ttsAutoPlay: boolean;
+  ttsRate: number;
+  ttsPitch: number;
+  ttsVolume: number;
 }
 
 // Chat history entry
@@ -29,6 +36,42 @@ export interface ChatHistoryEntry {
   timestamp: number;
   messageCount: number;
   messages: Message[];
+}
+
+export interface SaveChatHistoryResult {
+  localSaved: boolean;
+  serverSaved: boolean;
+}
+
+export interface DeleteChatHistoryResult {
+  localDeleted: boolean;
+  serverDeleted: boolean;
+}
+
+export interface ClearChatHistoryResult {
+  localCleared: boolean;
+  serverCleared: boolean;
+}
+
+// Server responses only include chat metadata, not the full transcript
+export interface ChatHistoryListItem {
+  id: string;
+  summary: string;
+  timestamp: number;
+  messageCount: number;
+  messages?: Message[];
+  lastModified?: string;
+}
+
+export interface StorageStats {
+  local: {
+    count: number;
+    size: string;
+  };
+  server: {
+    count: number;
+    available: boolean;
+  };
 }
 
 // Connection status types
@@ -142,7 +185,7 @@ export interface LoadChatHistoryResponse {
 
 export interface ChatHistoryListResponse {
   success: boolean;
-  data?: ChatHistoryEntry[];
+  data?: ChatHistoryListItem[];
   message: string;
 }
 
@@ -196,6 +239,8 @@ export interface ChatContextType {
   chatHistory: ChatHistoryEntry[];
   currentChatId: string | null;
   isLoading: boolean;
+  lastAssistantMessageId: string | null;
+  lastAssistantMessageTimestamp: number;
   addMessage: (content: string, role: Message['role']) => void;
   sendMessage: (content: string) => Promise<void>;
   clearChat: () => void;
@@ -255,6 +300,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   systemPrompt: 'You are a helpful AI assistant. Provide clear, accurate and helpful responses.',
   mcpEnabled: false,
   mcpServers: [],
+  voiceInputEnabled: true,
+  ttsEnabled: true,
+  ttsAutoPlay: false,
+  ttsRate: 1.0,
+  ttsPitch: 1.0,
+  ttsVolume: 1.0,
 };
 
 // API endpoints

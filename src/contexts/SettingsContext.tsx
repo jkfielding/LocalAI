@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import type { 
   AppSettings, 
@@ -11,16 +11,7 @@ import type {
 } from '../types';
 import { DEFAULT_SETTINGS, STORAGE_KEYS } from '../types';
 import { MCPService } from '../services/mcpService';
-
-const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
-
-export const useSettings = (): SettingsContextType => {
-  const context = useContext(SettingsContext);
-  if (!context) {
-    throw new Error('useSettings must be used within a SettingsProvider');
-  }
-  return context;
-};
+import { SettingsContext } from './SettingsContextObject';
 
 interface SettingsProviderProps {
   children: ReactNode;
@@ -76,20 +67,6 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
     }
   }, [settings.darkModeEnabled]);
 
-  // Test initial connection
-  useEffect(() => {
-    if (isSetupComplete) {
-      testConnection();
-    }
-  }, [isSetupComplete, settings.apiEndpoint]);
-
-  // Fetch models when connection is successful
-  useEffect(() => {
-    if (connectionStatus === 'connected') {
-      fetchAvailableModels();
-    }
-  }, [connectionStatus]);
-
   const updateSettings = (newSettings: Partial<AppSettings>) => {
     const updatedSettings = { ...settings, ...newSettings };
     
@@ -117,7 +94,7 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
     }
   };
 
-  const testConnection = async (): Promise<boolean> => {
+  const testConnection = useCallback(async (): Promise<boolean> => {
     setConnectionStatus('connecting');
     
     try {
@@ -167,9 +144,9 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
       setConnectionStatus('error');
       return false;
     }
-  };
+  }, [settings.apiEndpoint]);
 
-  const fetchAvailableModels = async (): Promise<void> => {
+  const fetchAvailableModels = useCallback(async (): Promise<void> => {
     setIsLoadingModels(true);
     
     try {
@@ -202,7 +179,21 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
     } finally {
       setIsLoadingModels(false);
     }
-  };
+  }, [settings.apiEndpoint, settings.modelName]);
+
+  // Test initial connection
+  useEffect(() => {
+    if (isSetupComplete) {
+      testConnection();
+    }
+  }, [isSetupComplete, testConnection]);
+
+  // Fetch models when connection is successful
+  useEffect(() => {
+    if (connectionStatus === 'connected') {
+      fetchAvailableModels();
+    }
+  }, [connectionStatus, fetchAvailableModels]);
 
   const markSetupComplete = () => {
     setIsSetupComplete(true);
@@ -263,7 +254,7 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
         mcpService.addServer(server);
       });
     }
-  }, [settings.mcpEnabled, settings.mcpServers]);
+  }, [settings.mcpEnabled, settings.mcpServers, mcpService]);
 
   const value: SettingsContextType = {
     settings,

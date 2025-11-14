@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FiX, FiRefreshCw, FiCheckCircle, FiXCircle } from 'react-icons/fi';
 import type { SettingsModalProps } from '../types';
-import { useSettings } from '../contexts/SettingsContext';
+import { useSettings } from '../hooks/useSettings';
 import LoadingSpinner from './LoadingSpinner';
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onShowSetupWizard }) => {
@@ -33,7 +33,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onShowSe
       // Apply dark mode change immediately (temporary)
       updateSettings({ darkModeEnabled: localSettings.darkModeEnabled });
     }
-  }, [localSettings.darkModeEnabled, isOpen]);
+  }, [localSettings.darkModeEnabled, settings.darkModeEnabled, isOpen, updateSettings]);
 
   const handleSave = () => {
     updateSettings(localSettings);
@@ -211,23 +211,99 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onShowSe
             </p>
           </div>
 
-          {/* Streaming */}
-          <div className="flex items-center justify-between">
-            <div>
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Enable Streaming
-              </label>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                ChatGPT-like response streaming
-              </p>
+          {/* Chat History Storage */}
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Chat History Storage
+            </label>
+            <div className="space-y-3">
+              <div 
+                onClick={() => handleInputChange('chatHistoryStorage', 'local')}
+                className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
+                  localSettings.chatHistoryStorage === 'local'
+                    ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20'
+                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                }`}
+              >
+                <div className="flex items-start space-x-3">
+                  <input
+                    type="radio"
+                    name="storage"
+                    checked={localSettings.chatHistoryStorage === 'local'}
+                    onChange={() => handleInputChange('chatHistoryStorage', 'local')}
+                    className="mt-1"
+                  />
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-900 dark:text-white">
+                      Device Only (Browser Storage)
+                    </div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                      • Stored in your browser's local storage<br/>
+                      • Private to this device and browser<br/>
+                      • ~5-10MB storage limit<br/>
+                      • Works completely offline<br/>
+                      • ⚠️ Cleared if you clear browser data
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div 
+                onClick={() => handleInputChange('chatHistoryStorage', 'server')}
+                className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
+                  localSettings.chatHistoryStorage === 'server'
+                    ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20'
+                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                }`}
+              >
+                <div className="flex items-start space-x-3">
+                  <input
+                    type="radio"
+                    name="storage"
+                    checked={localSettings.chatHistoryStorage === 'server'}
+                    onChange={() => handleInputChange('chatHistoryStorage', 'server')}
+                    className="mt-1"
+                  />
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-900 dark:text-white">
+                      Companion Server (Docker Container)
+                    </div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                      • Stored on the companion server (port 5174)<br/>
+                      • Syncs across all devices on your network<br/>
+                      • Unlimited storage (disk-based)<br/>
+                      • Persists in Docker volume: <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">localai-chat-data</code><br/>
+                      • ✅ Recommended for multi-device usage
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={localSettings.streamingEnabled}
-                onChange={(e) => handleInputChange('streamingEnabled', e.target.checked)}
-                className="sr-only"
-              />
+            <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+              <div className="text-xs text-blue-800 dark:text-blue-200">
+                <strong>💡 Tip:</strong> You can switch between storage modes anytime. Existing chats remain accessible from both locations.
+              </div>
+            </div>
+          </div>
+
+          {/* Streaming */}
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Enable Streaming
+                </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Real-time token-by-token response streaming
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={localSettings.streamingEnabled}
+                  onChange={(e) => handleInputChange('streamingEnabled', e.target.checked)}
+                  className="sr-only"
+                />
               <div className={`w-11 h-6 rounded-full ${localSettings.streamingEnabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'} transition-colors`}>
                 <div className={`dot absolute left-1 top-1 w-4 h-4 rounded-full bg-white transition-transform ${localSettings.streamingEnabled ? 'translate-x-5' : ''}`} />
               </div>
@@ -412,6 +488,146 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onShowSe
             )}
           </div>
 
+          {/* Voice Settings */}
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+              Voice Features
+            </h3>
+            
+            {/* Voice Input Toggle */}
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Voice Input
+                </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Use microphone for speech-to-text input
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={localSettings.voiceInputEnabled}
+                  onChange={(e) => handleInputChange('voiceInputEnabled', e.target.checked)}
+                  className="sr-only"
+                />
+                <div className={`w-11 h-6 rounded-full transition-colors ${localSettings.voiceInputEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                  <div className={`w-5 h-5 bg-white rounded-full shadow-md transform transition-transform ${localSettings.voiceInputEnabled ? 'translate-x-5' : 'translate-x-0'} mt-0.5 ml-0.5`} />
+                </div>
+              </label>
+            </div>
+
+            {/* TTS Toggle */}
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Text-to-Speech
+                </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Enable read-aloud for AI responses
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={localSettings.ttsEnabled}
+                  onChange={(e) => handleInputChange('ttsEnabled', e.target.checked)}
+                  className="sr-only"
+                />
+                <div className={`w-11 h-6 rounded-full transition-colors ${localSettings.ttsEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                  <div className={`w-5 h-5 bg-white rounded-full shadow-md transform transition-transform ${localSettings.ttsEnabled ? 'translate-x-5' : 'translate-x-0'} mt-0.5 ml-0.5`} />
+                </div>
+              </label>
+            </div>
+
+            {localSettings.ttsEnabled && (
+              <div className="space-y-4 ml-4 pl-4 border-l-2 border-gray-200 dark:border-gray-700">
+                {/* TTS Auto-play */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Auto-play Responses
+                    </label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Automatically read AI responses aloud
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={localSettings.ttsAutoPlay}
+                      onChange={(e) => handleInputChange('ttsAutoPlay', e.target.checked)}
+                      className="sr-only"
+                    />
+                    <div className={`w-11 h-6 rounded-full transition-colors ${localSettings.ttsAutoPlay ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                      <div className={`w-5 h-5 bg-white rounded-full shadow-md transform transition-transform ${localSettings.ttsAutoPlay ? 'translate-x-5' : 'translate-x-0'} mt-0.5 ml-0.5`} />
+                    </div>
+                  </label>
+                </div>
+
+                {/* Speech Rate */}
+                <div>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Speech Rate: {localSettings.ttsRate.toFixed(1)}x
+                  </label>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="2.0"
+                    step="0.1"
+                    value={localSettings.ttsRate}
+                    onChange={(e) => handleInputChange('ttsRate', parseFloat(e.target.value))}
+                    className="w-full mt-2"
+                  />
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>Slower</span>
+                    <span>Faster</span>
+                  </div>
+                </div>
+
+                {/* Speech Pitch */}
+                <div>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Speech Pitch: {localSettings.ttsPitch.toFixed(1)}
+                  </label>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="2.0"
+                    step="0.1"
+                    value={localSettings.ttsPitch}
+                    onChange={(e) => handleInputChange('ttsPitch', parseFloat(e.target.value))}
+                    className="w-full mt-2"
+                  />
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>Lower</span>
+                    <span>Higher</span>
+                  </div>
+                </div>
+
+                {/* Speech Volume */}
+                <div>
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Speech Volume: {Math.round(localSettings.ttsVolume * 100)}%
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={localSettings.ttsVolume}
+                    onChange={(e) => handleInputChange('ttsVolume', parseFloat(e.target.value))}
+                    className="w-full mt-2"
+                  />
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>Quiet</span>
+                    <span>Loud</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Connection Test */}
           <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
             <div className="flex items-center justify-between mb-3">
@@ -453,6 +669,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onShowSe
               )}
             </div>
           </div>
+        </div>
         </div>
 
         {/* Footer */}

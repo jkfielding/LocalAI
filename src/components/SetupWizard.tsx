@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { FiX, FiArrowLeft, FiArrowRight, FiCheckCircle, FiXCircle, FiSearch } from 'react-icons/fi';
 import type { SetupWizardProps } from '../types';
-import { useSettings } from '../contexts/SettingsContext';
+import { useSettings } from '../hooks/useSettings';
 import LoadingSpinner from './LoadingSpinner';
 import NetworkScannerComponent from './NetworkScannerComponent';
 

@@ -7,11 +7,16 @@ import {
   FiPlus,
   FiWifi,
   FiWifiOff,
-  FiArrowDown
+  FiArrowDown,
+  FiMic,
+  FiMicOff
 } from 'react-icons/fi';
 
-import { SettingsProvider, useSettings } from './contexts/SettingsContext';
-import { ChatProvider, useChat } from './contexts/ChatContext';
+import { SettingsProvider } from './contexts/SettingsContext';
+import { ChatProvider } from './contexts/ChatContext';
+import { useSettings } from './hooks/useSettings';
+import { useChat } from './hooks/useChat';
+import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 
 // Components (we'll create these next)
 import MessageBubble from './components/MessageBubble';
@@ -119,6 +124,7 @@ const ChatArea: React.FC = () => {
   const [isAutoScrolling, setIsAutoScrolling] = useState(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const lastMessageRef = useRef<HTMLDivElement>(null);
+  const initialScrollDone = useRef(false);
 
   // Check if user is near bottom of chat
   const isNearBottom = useCallback(() => {
@@ -164,11 +170,17 @@ const ChatArea: React.FC = () => {
 
   // Scroll to bottom on initial load
   useEffect(() => {
-    if (messages.length > 0) {
-      // Small delay to ensure content is rendered
-      setTimeout(() => scrollToBottom(false), 100);
+    if (messages.length === 0) {
+      initialScrollDone.current = false;
+      return;
     }
-  }, [messages.length === 1, scrollToBottom]); // Only on first message
+
+    if (!initialScrollDone.current) {
+      initialScrollDone.current = true;
+      const timeoutId = setTimeout(() => scrollToBottom(false), 100);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [messages.length, scrollToBottom]);
 
   return (
     <div 
@@ -213,10 +225,29 @@ const ChatArea: React.FC = () => {
 
 const ChatInput: React.FC = () => {
   const { sendMessage, isLoading, abortCurrentRequest } = useChat();
-  const { connectionStatus } = useSettings();
+  const { connectionStatus, settings } = useSettings();
   const [input, setInput] = useState('');
   const [charCount, setCharCount] = useState(0);
   const maxChars = 4000;
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const { isListening, isSupported: isSpeechSupported, startListening, stopListening, transcript } = useSpeechRecognition({
+    onResult: (text) => {
+      setInput(prev => prev + (prev ? ' ' : '') + text);
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+      }
+    },
+    onError: (error) => {
+      console.error('Speech recognition error:', error);
+    }
+  });
+
+  useEffect(() => {
+    if ((!settings.voiceInputEnabled || connectionStatus !== 'connected') && isListening) {
+      stopListening();
+    }
+  }, [connectionStatus, isListening, settings.voiceInputEnabled, stopListening]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -227,11 +258,27 @@ const ChatInput: React.FC = () => {
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     if (value.length <= maxChars) {
       setInput(value);
       setCharCount(value.length);
+      
+      // Auto-resize textarea
+      const target = e.target;
+      target.style.height = 'auto';
+      target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
+    }
+  };
+
+  const toggleVoiceInput = () => {
+    if (!settings.voiceInputEnabled || !isSpeechSupported || connectionStatus !== 'connected') {
+      return;
+    }
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
     }
   };
 
@@ -243,6 +290,9 @@ const ChatInput: React.FC = () => {
   };
 
   const canSend = input.trim().length > 0 && connectionStatus === 'connected' && !isLoading;
+  const displayValue = isListening
+    ? `${input}${transcript ? `${input ? ' ' : ''}${transcript}` : ''}`
+    : input;
 
   return (
     <div className="bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-4 sticky bottom-0">
@@ -250,19 +300,44 @@ const ChatInput: React.FC = () => {
         <form onSubmit={handleSubmit} className="flex flex-col space-y-3">
           <div className="relative">
             <textarea
-              value={input}
+              ref={textareaRef}
+              value={displayValue}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
+              name="chat-message"
+              id="chat-message-input"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              data-gramm="false"
+              data-gramm_editor="false"
+              data-ms-editor="false"
+              enterKeyHint="send"
               placeholder={
                 connectionStatus === 'connected' 
-                  ? "Type your message here..." 
+                  ? (isListening ? "Listening..." : "Type your message here...") 
                   : "Connect to your AI service to start chatting"
               }
               disabled={connectionStatus !== 'connected'}
               rows={1}
-              className="w-full resize-none rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-3 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full resize-none rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-3 pr-12 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ minHeight: '48px', maxHeight: '120px' }}
             />
+            {settings.voiceInputEnabled && isSpeechSupported && connectionStatus === 'connected' && (
+              <button
+                type="button"
+                onClick={toggleVoiceInput}
+                className={`absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-lg transition-colors ${
+                  isListening 
+                    ? 'bg-red-600 text-white hover:bg-red-700' 
+                    : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+                title={isListening ? "Stop listening" : "Start voice input"}
+              >
+                {isListening ? <FiMicOff size={18} /> : <FiMic size={18} />}
+              </button>
+            )}
           </div>
           
           <div className="flex items-center justify-between">

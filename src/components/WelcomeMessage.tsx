@@ -1,6 +1,6 @@
 import React from 'react';
 import { FiSettings, FiHelpCircle, FiWifi, FiWifiOff } from 'react-icons/fi';
-import { useSettings } from '../contexts/SettingsContext';
+import { useSettings } from '../hooks/useSettings';
 
 const WelcomeMessage: React.FC = () => {
   const { connectionStatus, isSetupComplete } = useSettings();

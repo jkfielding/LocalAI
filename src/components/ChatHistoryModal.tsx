@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { FiX, FiMessageSquare, FiPlus, FiServer, FiSmartphone, FiUpload, FiRefreshCw, FiSettings, FiMoreVertical, FiEye } from 'react-icons/fi';
-import type { ChatHistoryModalProps, ChatHistoryEntry } from '../types';
-import { useChat } from '../contexts/ChatContext';
-import { useSettings } from '../contexts/SettingsContext';
+import type { ChatHistoryModalProps, ChatHistoryEntry, StorageStats } from '../types';
+import { useChat } from '../hooks/useChat';
+import { useSettings } from '../hooks/useSettings';
 import { ChatHistoryService } from '../services/chatHistoryService';
 import toast from 'react-hot-toast';
+
+const VIEW_OPTIONS: Array<'unified' | 'local' | 'server'> = ['unified', 'local', 'server'];
 
 const ChatHistoryModal: React.FC<ChatHistoryModalProps> = ({ isOpen, onClose }) => {
   const { loadChat, newChat } = useChat();
@@ -16,18 +18,14 @@ const ChatHistoryModal: React.FC<ChatHistoryModalProps> = ({ isOpen, onClose }) 
     duplicates: { id: string, inBoth: boolean }[]
   }>({ local: [], server: [], duplicates: [] });
   const [isLoading, setIsLoading] = useState(false);
-  const [storageStats, setStorageStats] = useState<any>(null);
+  const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
 
   // Create service instance
-  const chatHistoryService = new ChatHistoryService(settings.apiEndpoint, settings.chatHistoryStorage);
-
-  useEffect(() => {
-    if (isOpen) {
-      loadUnifiedHistory();
-      loadStorageStats();
-    }
-  }, [isOpen, settings.chatHistoryStorage]);
+  const chatHistoryService = useMemo(
+    () => new ChatHistoryService(settings.chatHistoryStorage),
+    [settings.chatHistoryStorage]
+  );
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -46,7 +44,7 @@ const ChatHistoryModal: React.FC<ChatHistoryModalProps> = ({ isOpen, onClose }) 
     }
   }, [openDropdown]);
 
-  const loadUnifiedHistory = async () => {
+  const loadUnifiedHistory = useCallback(async () => {
     setIsLoading(true);
     try {
       const unified = await chatHistoryService.loadUnifiedChatHistory();
@@ -57,16 +55,23 @@ const ChatHistoryModal: React.FC<ChatHistoryModalProps> = ({ isOpen, onClose }) 
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [chatHistoryService]);
 
-  const loadStorageStats = async () => {
+  const loadStorageStats = useCallback(async () => {
     try {
       const stats = await chatHistoryService.getStorageStats();
       setStorageStats(stats);
     } catch (error) {
       console.error('Error loading storage stats:', error);
     }
-  };
+  }, [chatHistoryService]);
+
+  useEffect(() => {
+    if (isOpen) {
+      loadUnifiedHistory();
+      loadStorageStats();
+    }
+  }, [isOpen, loadUnifiedHistory, loadStorageStats]);
 
   const handleLoadChat = (chatId: string) => {
     loadChat(chatId);
@@ -164,7 +169,7 @@ const ChatHistoryModal: React.FC<ChatHistoryModalProps> = ({ isOpen, onClose }) 
           inBothStorages: unifiedHistory.duplicates.some(dup => dup.id === chat.id)
         }));
       case 'unified':
-      default:
+      default: {
         // For unified view, we need to be smart about duplicates
         const seen = new Set<string>();
         const combined: Array<ChatHistoryEntry & { source: 'local' | 'server' | 'both', inBothStorages: boolean }> = [];
@@ -211,6 +216,7 @@ const ChatHistoryModal: React.FC<ChatHistoryModalProps> = ({ isOpen, onClose }) 
         });
         
         return combined.sort((a, b) => b.timestamp - a.timestamp);
+      }
     }
   };
 
@@ -277,10 +283,10 @@ const ChatHistoryModal: React.FC<ChatHistoryModalProps> = ({ isOpen, onClose }) 
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">View Chats:</label>
             <div className="flex space-x-2">
-              {['unified', 'local', 'server'].map((view) => (
+              {VIEW_OPTIONS.map((view) => (
                 <button
                   key={view}
-                  onClick={() => setCurrentView(view as any)}
+                  onClick={() => setCurrentView(view)}
                   className={`flex items-center space-x-1 px-3 py-2 text-sm rounded-lg transition-colors ${
                     currentView === view
                       ? 'bg-blue-600 text-white'

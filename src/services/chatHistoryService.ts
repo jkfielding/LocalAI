@@ -3,52 +3,37 @@ import type {
   SaveChatHistoryRequest,
   SaveChatHistoryResponse,
   LoadChatHistoryResponse,
-  ChatHistoryListResponse
+  ChatHistoryListResponse,
+  ChatHistoryListItem,
+  SaveChatHistoryResult,
+  DeleteChatHistoryResult,
+  ClearChatHistoryResult
 } from '../types';
-import { STORAGE_KEYS } from '../types';
+import { localHistoryStore } from '../utils/localHistoryStore';
 
 export class ChatHistoryService {
-  private baseUrl: string;
   private storageMode: 'local' | 'server';
   private companionServerUrl: string;
 
-  constructor(baseUrl: string, storageMode: 'local' | 'server' = 'local') {
-    // Remove /v1/chat/completions from the end to get base URL
-    this.baseUrl = baseUrl.replace(/\/v1\/chat\/completions$/, '');
+  constructor(storageMode: 'local' | 'server' = 'local') {
     this.storageMode = storageMode;
     
     // Determine companion server URL
-    this.companionServerUrl = this.getCompanionServerUrl(this.baseUrl);
+    this.companionServerUrl = this.getCompanionServerUrl();
   }
 
-  private getCompanionServerUrl(baseUrl: string): string {
+  private getCompanionServerUrl(): string {
     try {
-      const urlObj = new URL(baseUrl);
-      
-      // If we're accessing from the same origin as the web app, use relative path
-      if (typeof window !== 'undefined' && window.location.hostname === urlObj.hostname) {
-        return `${window.location.protocol}//${window.location.hostname}:5174`;
-      }
-      
-      // Otherwise, use the same host as the AI service but on port 5174
-      // Handle special case where localhost should use actual network IP when accessed remotely
-      if (urlObj.hostname === 'localhost' || urlObj.hostname === '127.0.0.1') {
-        // Try to determine if we're accessing this remotely
-        if (typeof window !== 'undefined' && 
-            window.location.hostname !== 'localhost' && 
-            window.location.hostname !== '127.0.0.1') {
-          // We're on a remote device, use the same IP as the current page
-          return `${window.location.protocol}//${window.location.hostname}:5174`;
-        }
-      }
-      
-      return `${urlObj.protocol}//${urlObj.hostname}:5174`;
-    } catch (error) {
-      console.error('Error parsing base URL for companion server:', error);
-      // Fallback to current host
+      // ALWAYS use the window's current hostname for the companion server
+      // This ensures it works whether accessed via localhost, 127.0.0.1, or network IP
       if (typeof window !== 'undefined') {
         return `${window.location.protocol}//${window.location.hostname}:5174`;
       }
+      
+      // Fallback for SSR (shouldn't happen in browser)
+      return 'http://localhost:5174';
+    } catch (error) {
+      console.error('Error determining companion server URL:', error);
       return 'http://localhost:5174';
     }
   }
@@ -57,18 +42,21 @@ export class ChatHistoryService {
     this.storageMode = mode;
   }
 
-  setBaseUrl(baseUrl: string) {
-    this.baseUrl = baseUrl.replace(/\/v1\/chat\/completions$/, '');
-    this.companionServerUrl = this.getCompanionServerUrl(this.baseUrl);
+  updateCompanionServerUrl() {
+    // Refresh companion server URL (useful if window.location changes)
+    this.companionServerUrl = this.getCompanionServerUrl();
   }
 
-  // Save chat history
-  async saveChatHistory(entry: ChatHistoryEntry): Promise<boolean> {
-    if (this.storageMode === 'local') {
-      return this.saveToLocal(entry);
-    } else {
-      return this.saveToServer(entry);
+  // Save chat history (always keeps a local copy, optionally syncs to server)
+  async saveChatHistory(entry: ChatHistoryEntry): Promise<SaveChatHistoryResult> {
+    const localSaved = await this.saveToLocal(entry);
+    let serverSaved = false;
+
+    if (this.storageMode === 'server') {
+      serverSaved = await this.saveToServer(entry);
     }
+
+    return { localSaved, serverSaved };
   }
 
   // Load chat history list
@@ -85,7 +73,7 @@ export class ChatHistoryService {
   async loadChatHistory(id: string): Promise<ChatHistoryEntry | null> {
     // First try the current storage mode
     if (this.storageMode === 'local') {
-      const localChat = this.loadFromLocal(id);
+      const localChat = await this.loadFromLocal(id);
       if (localChat) return localChat;
       
       // If not found locally, try server as fallback
@@ -121,90 +109,72 @@ export class ChatHistoryService {
   // Check if a chat exists in a specific storage
   async chatExistsInStorage(id: string, storage: 'local' | 'server'): Promise<boolean> {
     if (storage === 'local') {
-      return this.loadFromLocal(id) !== null;
+      return (await this.loadFromLocal(id)) !== null;
     } else {
       try {
         const chat = await this.loadFromServer(id);
         return chat !== null;
-      } catch (error) {
+      } catch {
         return false;
       }
     }
   }
 
-  // Delete chat history
-  async deleteChatHistory(id: string): Promise<boolean> {
-    if (this.storageMode === 'local') {
-      return this.deleteFromLocal(id);
-    } else {
-      return this.deleteFromServer(id);
+  // Delete chat history (keeps local/server copies in sync)
+  async deleteChatHistory(id: string): Promise<DeleteChatHistoryResult> {
+    const localDeleted = await this.deleteFromLocal(id);
+    let serverDeleted = false;
+
+    if (this.storageMode === 'server') {
+      serverDeleted = await this.deleteFromServer(id);
     }
+
+    return { localDeleted, serverDeleted };
   }
 
   // Clear all chat history
-  async clearAllChatHistory(): Promise<boolean> {
-    if (this.storageMode === 'local') {
-      return this.clearLocalHistory();
-    } else {
-      return this.clearServerHistory();
+  async clearAllChatHistory(): Promise<ClearChatHistoryResult> {
+    const localCleared = await this.clearLocalHistory();
+    let serverCleared = false;
+
+    if (this.storageMode === 'server') {
+      serverCleared = await this.clearServerHistory();
     }
+
+    return { localCleared, serverCleared };
   }
 
   // Local storage methods
-  private saveToLocal(entry: ChatHistoryEntry): boolean {
+  private async saveToLocal(entry: ChatHistoryEntry): Promise<boolean> {
     try {
-      const existingHistory = this.loadListFromLocal();
-      const existingIndex = existingHistory.findIndex(h => h.id === entry.id);
-      
-      if (existingIndex >= 0) {
-        existingHistory[existingIndex] = entry;
-      } else {
-        existingHistory.push(entry);
-      }
-      
-      localStorage.setItem(STORAGE_KEYS.CHAT_HISTORY, JSON.stringify(existingHistory));
-      return true;
+      const result = await localHistoryStore.save(entry);
+      return result;
     } catch (error) {
-      console.error('Error saving chat history to local storage:', error);
+      console.error('Local storage save error:', error);
       return false;
     }
   }
 
-  private loadListFromLocal(): ChatHistoryEntry[] {
+  private async loadListFromLocal(): Promise<ChatHistoryEntry[]> {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.CHAT_HISTORY);
-      return saved ? JSON.parse(saved) : [];
+      const result = await localHistoryStore.loadAll();
+      return result;
     } catch (error) {
-      console.error('Error loading chat history from local storage:', error);
-      return [];
+      console.error('Error loading from local storage:', error);
+      throw error;
     }
   }
 
-  private loadFromLocal(id: string): ChatHistoryEntry | null {
-    const history = this.loadListFromLocal();
-    return history.find(h => h.id === id) || null;
+  private async loadFromLocal(id: string): Promise<ChatHistoryEntry | null> {
+    return await localHistoryStore.load(id);
   }
 
-  private deleteFromLocal(id: string): boolean {
-    try {
-      const history = this.loadListFromLocal();
-      const filtered = history.filter(h => h.id !== id);
-      localStorage.setItem(STORAGE_KEYS.CHAT_HISTORY, JSON.stringify(filtered));
-      return true;
-    } catch (error) {
-      console.error('Error deleting chat history from local storage:', error);
-      return false;
-    }
+  private async deleteFromLocal(id: string): Promise<boolean> {
+    return await localHistoryStore.delete(id);
   }
 
-  private clearLocalHistory(): boolean {
-    try {
-      localStorage.removeItem(STORAGE_KEYS.CHAT_HISTORY);
-      return true;
-    } catch (error) {
-      console.error('Error clearing local chat history:', error);
-      return false;
-    }
+  private async clearLocalHistory(): Promise<boolean> {
+    return await localHistoryStore.clear();
   }
 
   // Server storage methods
@@ -216,18 +186,23 @@ export class ChatHistoryService {
         messages: entry.messages,
       };
 
-      // Use companion server endpoint
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
       const response = await fetch(`${this.companionServerUrl}/api/chat-history`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(request),
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         if (response.status === 404) {
-          console.warn('Companion server not available. Make sure LocalAI companion server is running.');
+          console.warn('Companion server not available. Make sure it is running on port 5174.');
         }
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -235,17 +210,26 @@ export class ChatHistoryService {
       const result: SaveChatHistoryResponse = await response.json();
       return result.success;
     } catch (error) {
-      console.error('Error saving chat history to companion server:', error);
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        console.warn('Network error: Could not connect to companion server. Make sure it is running on port 5174.');
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          console.warn('Server request timed out');
+          return false;
+        }
       }
+      console.error('Error saving to companion server:', error);
       return false;
     }
   }
 
   private async loadListFromServer(): Promise<ChatHistoryEntry[]> {
     try {
-      const response = await fetch(`${this.companionServerUrl}/api/chat-history`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+      const response = await fetch(`${this.companionServerUrl}/api/chat-history`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         if (response.status === 404) {
@@ -255,27 +239,38 @@ export class ChatHistoryService {
       }
 
       const result: ChatHistoryListResponse = await response.json();
-      return result.success && result.data ? result.data : [];
+      const entries = result.success && result.data ? result.data : [];
+      return entries.map(entry => this.normalizeServerEntry(entry));
     } catch (error) {
-      console.error('Error loading chat history from companion server:', error);
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        console.warn('Network error: Could not connect to companion server. Make sure it is running on port 5174.');
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Server request timeout');
       }
-      return [];
+      throw error;
     }
   }
 
   private async loadFromServer(id: string): Promise<ChatHistoryEntry | null> {
     try {
       const url = `${this.companionServerUrl}/api/chat-history/${id}`;
-      const response = await fetch(url);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const result: LoadChatHistoryResponse = await response.json();
-      return result.success && result.data ? result.data : null;
+      if (result.success && result.data) {
+        return {
+          ...result.data,
+          messages: Array.isArray(result.data.messages) ? result.data.messages : []
+        };
+      }
+      return null;
     } catch (error) {
       console.error('Error loading chat history from companion server:', error);
       return null;
@@ -285,9 +280,16 @@ export class ChatHistoryService {
   private async deleteFromServer(id: string): Promise<boolean> {
     try {
       const url = `${this.companionServerUrl}/api/chat-history/${id}`;
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
       const response = await fetch(url, {
         method: 'DELETE',
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -303,9 +305,15 @@ export class ChatHistoryService {
 
   private async clearServerHistory(): Promise<boolean> {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
       const response = await fetch(`${this.companionServerUrl}/api/chat-history`, {
         method: 'DELETE',
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -327,9 +335,12 @@ export class ChatHistoryService {
     server: ChatHistoryEntry[],
     duplicates: { id: string, inBoth: boolean }[]
   }> {
+    const localChatsPromise = this.loadListFromLocal().catch(() => []);
+    const serverChatsPromise = this.loadListFromServer().catch(() => []);
+    
     const [localChats, serverChats] = await Promise.all([
-      this.loadListFromLocal(),
-      this.loadListFromServer().catch(() => []) // Don't fail if server is unavailable
+      localChatsPromise,
+      serverChatsPromise
     ]);
 
     // Detect duplicates (chats that exist in both storages)
@@ -347,7 +358,7 @@ export class ChatHistoryService {
   // Get the actual storage locations of a chat (where it currently exists)
   async getChatStorageLocations(chatId: string): Promise<{ local: boolean, server: boolean }> {
     const [localExists, serverExists] = await Promise.all([
-      Promise.resolve(this.loadFromLocal(chatId) !== null),
+      this.loadFromLocal(chatId).then(chat => chat !== null).catch(() => false),
       this.loadFromServer(chatId).then(chat => chat !== null).catch(() => false)
     ]);
 
@@ -364,7 +375,7 @@ export class ChatHistoryService {
       
       // Load the chat from source storage
       if (fromStorage === 'local') {
-        chat = this.loadFromLocal(chatId);
+        chat = await this.loadFromLocal(chatId);
       } else {
         chat = await this.loadFromServer(chatId);
       }
@@ -376,7 +387,7 @@ export class ChatHistoryService {
 
       // Save to destination storage
       if (toStorage === 'local') {
-        return this.saveToLocal(chat);
+        return await this.saveToLocal(chat);
       } else {
         return await this.saveToServer(chat);
       }
@@ -388,7 +399,7 @@ export class ChatHistoryService {
 
   // Backup all local chats to server
   async backupLocalToServer(): Promise<{ success: number, failed: number }> {
-    const localChats = this.loadListFromLocal();
+    const localChats = await this.loadListFromLocal();
     let success = 0;
     let failed = 0;
 
@@ -418,7 +429,7 @@ export class ChatHistoryService {
 
       for (const chat of serverChats) {
         try {
-          const saved = this.saveToLocal(chat);
+          const saved = await this.saveToLocal(chat);
           if (saved) {
             success++;
           } else {
@@ -442,8 +453,8 @@ export class ChatHistoryService {
     local: { count: number, size: string },
     server: { count: number, available: boolean }
   }> {
-    const localChats = this.loadListFromLocal();
-    const localSize = this.estimateLocalStorageSize();
+    const localChats = await this.loadListFromLocal();
+    const localSize = await this.estimateLocalStorageSize();
     
     let serverCount = 0;
     let serverAvailable = false;
@@ -451,7 +462,7 @@ export class ChatHistoryService {
       const serverChats = await this.loadListFromServer();
       serverCount = serverChats.length;
       serverAvailable = true;
-    } catch (error) {
+    } catch {
       // Server not available
     }
 
@@ -467,18 +478,18 @@ export class ChatHistoryService {
     };
   }
 
-  private estimateLocalStorageSize(): string {
-    try {
-      const data = localStorage.getItem(STORAGE_KEYS.CHAT_HISTORY);
-      if (!data) return '0 KB';
-      
-      const bytes = new Blob([data]).size;
-      if (bytes < 1024) return `${bytes} B`;
-      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    } catch (error) {
-      return 'Unknown';
-    }
+  private normalizeServerEntry(entry: ChatHistoryListItem): ChatHistoryEntry {
+    return {
+      id: entry.id,
+      summary: entry.summary,
+      timestamp: entry.timestamp,
+      messageCount: entry.messageCount,
+      messages: Array.isArray(entry.messages) ? entry.messages : []
+    };
+  }
+
+  private async estimateLocalStorageSize(): Promise<string> {
+    return await localHistoryStore.estimateSize();
   }
   async checkServerSupport(): Promise<boolean> {
     if (this.storageMode !== 'server') return true;
